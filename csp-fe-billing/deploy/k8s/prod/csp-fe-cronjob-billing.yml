@@ -1,0 +1,55 @@
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: csp-fe-cronjob-billing
+  namespace: csp
+spec:
+  schedule: "0 11 10,16 * *"
+  concurrencyPolicy: Replace
+  failedJobsHistoryLimit: 1
+  successfulJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: csp-fe-cronjob-billing
+          annotations:
+            vault.hashicorp.com/agent-pre-populate-only: 'true'
+            vault.hashicorp.com/agent-inject: 'true'
+            vault.hashicorp.com/tls-skip-verify: 'true'
+            vault.hashicorp.com/auth-path: 'auth/k8sclouds_z00n-prd'
+            vault.hashicorp.com/role: 'csp-deploy'
+            vault.hashicorp.com/agent-inject-secret-config: "secrets/config"
+            vault.hashicorp.com/agent-inject-template-config: |
+              {{ with secret "/team/clouds/flexible-engine/cloudstore-API" -}}
+                export fe_autorizationId="{{ .Data.Authorization_header }}"
+                export fe_token_url="{{ .Data.token_url }}"
+                export fe_cloudstore_token="{{ .Data.Cloudstore_token }}"
+                export fe_contract_id="{{ .Data.Contract_ID }}"
+              {{- end }}
+              {{ with secret "/team/clouds/build/csp-reporting" -}}
+                export db_host="{{ .Data.db_host }}"
+                export db_database="{{ .Data.db_database }}"
+                export db_user="{{ .Data.db_cloudadmin }}"
+                export db_password="{{ .Data.db_cloudadmin_password }}"
+                export zabbix_url="{{ .Data.zabbix_url }}"
+                export zabbix_monitored_host="{{ .Data.zabbix_monitored_host }}"
+              {{- end }}
+        spec:
+          serviceAccountName: csp-deploy
+          containers:
+          - name: csp-fe-cronjob-billing
+            image: multirepo-oab.si.fr.intraorange:5002/dd_cloud_reporting/csp-fe-billing:1.0.0
+            command: ["/bin/bash","-c","source /vault/secrets/config && python3 /app/fe.py"]
+            imagePullPolicy: Always
+            volumeMounts:
+              - name: tz-config
+                mountPath: /etc/localtime
+          imagePullSecrets:
+          - name: regcred
+          restartPolicy: OnFailure
+          volumes:
+          - name: tz-config
+            hostPath:
+              path: /usr/share/zoneinfo/Europe/Paris
