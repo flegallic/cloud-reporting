@@ -1,0 +1,111 @@
+#Pod
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: csp-pma
+  name: csp-pma
+  namespace: csp
+spec:
+  selector:
+    matchLabels:
+      app: csp-pma
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: csp-pma
+    spec:
+      containers:
+      - name: csp-pma
+        image: xxxxxxxxxxxxxxxxxxxxxxxxxxxx:5002/bitnami/phpmyadmin:5.1.1
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+        env:
+        - name: DATABASE_HOST
+          value: csp-mysql-service
+        - name: DATABASE_PORT_NUMBER
+          value: "3306"
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "100Mi"
+          limits:
+            cpu: "100m"
+            memory: "100Mi"
+      imagePullSecrets:
+      - name: regcred
+      restartPolicy: Always
+      volumes:
+      - name: tz-config
+        hostPath:
+          path: /usr/share/zoneinfo/Europe/Paris
+
+#Service
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: csp-pma-service
+  namespace: csp
+spec:
+  ports:
+  - port: 8080
+    protocol: TCP
+    targetPort: 8080
+  selector:
+    app: csp-pma
+  type: ClusterIP
+
+#Ingress controller
+---
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: csp-pma
+  namespace: csp
+  labels:
+    k8s-app: csp-pma
+    app: csp-pma
+    component: frontend
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 32m
+spec:
+  rules:
+  - host: csp-pma.xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: csp-pma-service
+          servicePort: 8080
+  tls:
+  - hosts:
+    - csp-pma.xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    secretName: wildcard.xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+#Network policy
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    app: csp-pma
+    name: from-ingress
+  name: csp-pma
+  namespace: csp
+spec:
+  ingress:
+  - from:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+    ports:
+    - port: 8080
+      protocol: TCP
+  podSelector:
+    matchLabels:
+      app: csp-pma
+  policyTypes:
+  - Ingress

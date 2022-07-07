@@ -1,0 +1,178 @@
+#Pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: csp-prp-grafana-pvc
+  namespace: csp-prp
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+status: {}
+
+#ConfigMap
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: csp-prp-grafana-ini
+  namespace: csp-prp
+data:
+  grafana.ini: |
+    [server]
+      root_url = https://pp-cloud-reporting.xxxxxxxxxxxxxxxxxxxxxxxxx
+    [panel]
+      disable_sanitize_html = true
+    [users]
+      allow_sign_up = false
+      auto_assign_org = true
+      auto_assign_org_role = Viewer
+    [security]
+      admin_user = dcs_admin
+      admin_password = xxxxxxxxxxxxxxxxxxxxxxxxx
+    [auth]
+      disable_login_form = false
+      signout_redirect_url = https://pp-cloud-reporting.xxxxxxxxxxxxxxxxxxxxxxxxx/Shibboleth.sso/Logout
+    [live]
+    allowed_origins = "https://pp-cloud-reporting.xxxxxxxxxxxxxxxxxxxxxxxxx,https://sign-on.orange-business.com"
+    [auth.proxy]
+      enabled = true
+      header_name = X-WEBAUTH-USER
+      header_property = username
+      auto_sign_up = true
+      headers = Name:X-WEBAUTH-NAME Email:X-WEBAUTH-EMAIL
+    [date_formats]
+      default_timezone = browser
+
+#Pod
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  labels:
+    app: csp-prp-grafana
+  name: csp-prp-grafana
+  namespace: csp-prp
+spec:
+  selector:
+    matchLabels:
+      app: csp-prp-grafana
+  replicas: 1
+  serviceName: csp-prp-grafana
+  template:
+    metadata:
+      labels:
+        app: csp-prp-grafana
+      annotations:
+        backup.velero.io/backup-volumes: csp-prp-grafana-data
+    spec:
+      serviceAccountName: csp-prp-deploy
+      securityContext:
+        fsGroup: 472
+        supplementalGroups:
+        - 0
+      containers:
+      - name: csp-prp-grafana
+        image: xxxxxxxxxxxxxxxxxxxxxxxxx:5002/grafana/grafana:8.3.3
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 3000
+          name: http-grafana
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /robots.txt
+            port: 3000
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          successThreshold: 1
+          timeoutSeconds: 2
+        volumeMounts:
+        - mountPath: /var/lib/grafana
+          name: csp-prp-grafana-data
+        - name: csp-prp-grafana-ini
+          mountPath: "/etc/grafana/"
+          readOnly: true
+      imagePullSecrets:
+      - name: regcred
+      restartPolicy: Always
+      volumes:
+      - name: csp-prp-grafana-data
+        persistentVolumeClaim:
+          claimName: csp-prp-grafana-pvc
+      - name: csp-prp-grafana-ini
+        configMap:
+          name: csp-prp-grafana-ini
+
+#Service
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: csp-prp-grafana-service
+  namespace: csp-prp
+spec:
+  selector:
+    app: csp-prp-grafana
+  ports:
+  - protocol: TCP
+    port: 3000
+    targetPort: 3000
+  type: ClusterIP
+
+#Ingress controller
+---
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: csp-prp-grafana
+  namespace: csp-prp
+  labels:
+    k8s-app: csp-prp-grafana
+    app: csp-prp-grafana
+    component: frontend
+  annotations:
+    # extend websocket connection timeout
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  rules:
+  - host: pp-cloud-reporting.xxxxxxxxxxxxxxxxxxxxxxxxx
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: csp-prp-grafana-service
+          servicePort: 3000
+  tls:
+  - hosts:
+    - pp-cloud-reporting.xxxxxxxxxxxxxxxxxxxxxxxxx
+    secretName: cloud-reporting.xxxxxxxxxxxxxxxxxxxxxxxxx
+
+#Network policy
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    app: csp-prp-grafana
+    name: from-ingress
+  name: csp-prp-grafana
+  namespace: csp-prp
+spec:
+  ingress:
+  - from:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+    ports:
+    - port: 3000
+      protocol: TCP
+  podSelector:
+    matchLabels:
+      app: csp-prp-grafana
+  policyTypes:
+  - Ingress

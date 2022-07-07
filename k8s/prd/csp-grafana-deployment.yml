@@ -1,0 +1,188 @@
+#Pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: csp-grafana-pvc
+  namespace: csp
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+status: {}
+
+#ConfigMap
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: csp-grafana-ini
+  namespace: csp
+data:
+  grafana.ini: |
+    [server]
+      root_url = https://cloud-reporting.xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    [panel]
+      disable_sanitize_html = true
+    [users]
+      allow_sign_up = false
+      auto_assign_org = true
+      auto_assign_org_role = Viewer
+    [security]
+      admin_user = dcs_admin
+      admin_password = xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    [auth]
+      disable_login_form = false
+      signout_redirect_url = https://xxxxxxxxxxxxxxxxxxxxxxxxxxxx/Shibboleth.sso/Logout
+    [live]
+    allowed_origins = "https://xxxxxxxxxxxxxxxxxxxxxxxxxxxx,https://sign-on.orange-business.com"
+    [auth.proxy]
+      enabled = true
+      header_name = X-WEBAUTH-USER
+      header_property = username
+      auto_sign_up = true
+      headers = Name:X-WEBAUTH-NAME Email:X-WEBAUTH-EMAIL
+    [date_formats]
+      default_timezone = browser
+
+#Pod
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  labels:
+    app: csp-grafana
+  name: csp-grafana
+  namespace: csp
+spec:
+  selector:
+    matchLabels:
+      app: csp-grafana
+  replicas: 1
+  serviceName: csp-grafana
+  template:
+    metadata:
+      labels:
+        app: csp-grafana
+      annotations:
+        backup.velero.io/backup-volumes: csp-grafana-data
+    spec:
+      serviceAccountName: csp-deploy
+      securityContext:
+        fsGroup: 472
+        supplementalGroups:
+        - 0
+      containers:
+      - name: csp-grafana
+        image: xxxxxxxxxxxxxxxxxxxxxxxxxxxx:5002/grafana/grafana:8.3.3
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 3000
+          name: http-grafana
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /robots.txt
+            port: 3000
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          successThreshold: 1
+          timeoutSeconds: 2
+        volumeMounts:
+        - mountPath: /var/lib/grafana
+          name: csp-grafana-data
+        - name: csp-grafana-ini
+          mountPath: "/etc/grafana/"
+          readOnly: true
+      imagePullSecrets:
+        - name: regcred
+      restartPolicy: Always
+      volumes:
+      - name: csp-grafana-data
+        persistentVolumeClaim:
+          claimName: csp-grafana-pvc
+      - name: csp-grafana-ini
+        configMap:
+          name: csp-grafana-ini
+
+#Service
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: csp-grafana-service
+  namespace: csp
+spec:
+  selector:
+    app: csp-grafana
+  ports:
+  - protocol: TCP
+    port: 3000
+    targetPort: 3000
+  type: ClusterIP
+
+#Ingress controller
+---
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: csp-grafana
+  namespace: csp
+  labels:
+    k8s-app: csp-grafana
+    app: csp-grafana
+    component: frontend
+  annotations:
+    # extend websocket connection timeout
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  rules:
+  - host: xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: csp-grafana-service
+          servicePort: 3000
+  - host: csp-reporting.xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: csp-grafana-service
+          servicePort: 3000
+  tls:
+  - hosts:
+    - xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    secretName: xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  - hosts:
+    - csp-reporting.xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    secretName: wildcard.xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+#Network policy
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    app: csp-grafana
+    name: from-ingress
+  name: csp-grafana
+  namespace: csp
+spec:
+  ingress:
+  - from:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+    ports:
+    - port: 3000
+      protocol: TCP
+  podSelector:
+    matchLabels:
+      app: csp-grafana
+  policyTypes:
+  - Ingress

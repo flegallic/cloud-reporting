@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: wildcard.xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  namespace: csp-prp
+data:
+  tls.crt: xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  tls.key: xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+type: kubernetes.io/tls

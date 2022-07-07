@@ -1,0 +1,113 @@
+#Pvc
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: csp-prp-mysql-pvc
+  namespace: csp-prp
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+status: {}
+
+#Pod
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: csp-prp-mysql
+  namespace: csp-prp
+spec:
+  selector:
+    matchLabels:
+      app: csp-prp-mysql
+  replicas: 1
+  serviceName: csp-prp-mysql
+  template:
+    metadata:
+      labels:
+        app: csp-prp-mysql
+      annotations:
+        backup.velero.io/backup-volumes: csp-prp-mysql-data
+        vault.hashicorp.com/agent-pre-populate-only: 'true'
+        vault.hashicorp.com/agent-inject: 'true'
+        vault.hashicorp.com/tls-skip-verify: 'true'
+        vault.hashicorp.com/auth-path: 'auth/k8sclouds_z00n-prd'
+        vault.hashicorp.com/role: 'csp-prp-deploy'
+        vault.hashicorp.com/agent-inject-secret-root: "secrets/root"
+        vault.hashicorp.com/agent-inject-template-root: |
+          {{ with secret "/team/clouds/build/suivi_SIP_prp" -}}
+            {{ .Data.db_password }}
+          {{- end }}
+        vault.hashicorp.com/agent-inject-secret-database: "secrets/database"
+        vault.hashicorp.com/agent-inject-template-database: |
+          {{ with secret "/team/clouds/build/suivi_SIP_prp" -}}
+            {{ .Data.db_database }}
+          {{- end }}
+        vault.hashicorp.com/agent-inject-secret-user: "secrets/user"
+        vault.hashicorp.com/agent-inject-template-user: |
+          {{ with secret "/team/clouds/build/suivi_SIP_prp" -}}
+            {{ .Data.db_cloudadmin }}
+          {{- end }}
+        vault.hashicorp.com/agent-inject-secret-pwd: "secrets/pwd"
+        vault.hashicorp.com/agent-inject-template-pwd: |
+          {{ with secret "/team/clouds/build/suivi_SIP_prp" -}}
+            {{ .Data.db_cloudadmin_password }}
+          {{- end }}
+    spec:
+      terminationGracePeriodSeconds: 10
+      serviceAccountName: csp-prp-deploy
+      containers:
+      - name: csp-prp-mysql
+        image: xxxxxxxxxxxxxxxxxxxxxxxxx:5002/mysql:8.0
+        imagePullPolicy: IfNotPresent
+        args: ["--sql-mode="]
+        ports:
+        - containerPort: 3306
+          protocol: TCP
+        env:
+        - name: MYSQL_ROOT_PASSWORD_FILE
+          value: /vault/secrets/root
+        - name: MYSQL_DATABASE_FILE
+          value: /vault/secrets/database
+        - name: MYSQL_USER_FILE
+          value: /vault/secrets/user
+        - name: MYSQL_PASSWORD_FILE
+          value: /vault/secrets/pwd
+        volumeMounts:
+        - name: csp-prp-mysql-data
+          mountPath: /var/lib/mysql
+        - name: tz-config
+          mountPath: /etc/localtime
+        resources: {}
+      imagePullSecrets:
+      - name: regcred
+      restartPolicy: Always
+      volumes:
+      - name: csp-prp-mysql-data
+        persistentVolumeClaim:
+          claimName: csp-prp-mysql-pvc
+      - name: tz-config
+        hostPath:
+           path: /usr/share/zoneinfo/Europe/Paris
+
+#Service
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: csp-prp-mysql-service
+  namespace: csp-prp
+spec:
+  ports:
+  - port: 3306
+    protocol: TCP
+    targetPort: 3306
+  selector:
+    app: csp-prp-mysql
+  sessionAffinity: None
+  type: ClusterIP
+status:
+  loadBalancer: {}
