@@ -1,0 +1,48 @@
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: csp-prp-fusion-cronjob
+  namespace: csp-prp
+spec:
+  schedule: "0 7 14,18 * *"
+  concurrencyPolicy: Replace
+  failedJobsHistoryLimit: 1
+  successfulJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: csp-prp-fusion-cronjob
+          annotations:
+            vault.hashicorp.com/agent-pre-populate-only: 'true'
+            vault.hashicorp.com/agent-inject: 'true'
+            vault.hashicorp.com/tls-skip-verify: 'true'
+            vault.hashicorp.com/auth-path: 'auth/k8sclouds_z00n-prd'
+            vault.hashicorp.com/role: 'csp-prp-deploy'
+            vault.hashicorp.com/agent-inject-secret-config: "secrets/config"
+            vault.hashicorp.com/agent-inject-template-config: |
+              {{ with secret "/team/clouds/build/suivi_SIP_prp" -}}
+                export db_host="{{ .Data.db_host }}"
+                export db_database="{{ .Data.db_database }}"
+                export db_user="{{ .Data.db_cloudadmin }}"
+                export db_password="{{ .Data.db_cloudadmin_password }}"
+                export artifactory_apiKey="{{ .Data.artifactory_apiKey }}"
+              {{- end }}
+        spec:
+          serviceAccountName: csp-prp-deploy
+          containers:
+          - name: csp-prp-fusion-cronjob
+            image: multirepo-oab.si.fr.intraorange:5002/dd_cloud_reporting/csp-fusion:0.1
+            command: ["/bin/bash","-c","source /vault/secrets/config && python3 /app/fusion.py"]
+            imagePullPolicy: Always
+            volumeMounts:
+              - name: tz-config
+                mountPath: /etc/localtime
+          imagePullSecrets:
+          - name: regcred
+          restartPolicy: OnFailure
+          volumes:
+          - name: tz-config
+            hostPath:
+              path: /usr/share/zoneinfo/Europe/Paris
