@@ -1,0 +1,53 @@
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: csp-az-cronjob-billing
+  namespace: csp
+spec:
+  schedule: "0 10 10,16 * *"
+  concurrencyPolicy: Replace
+  failedJobsHistoryLimit: 1
+  successfulJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: csp-az-cronjob-billing
+          annotations:
+            vault.hashicorp.com/agent-pre-populate-only: 'true'
+            vault.hashicorp.com/agent-inject: 'true'
+            vault.hashicorp.com/tls-skip-verify: 'true'
+            vault.hashicorp.com/auth-path: 'auth/k8sclouds_z00n-prd'
+            vault.hashicorp.com/role: 'csp-deploy'
+            vault.hashicorp.com/agent-inject-secret-config: "secrets/config"
+            vault.hashicorp.com/agent-inject-template-config: |
+              {{ with secret "/team/clouds/azure/arrow" -}}
+                export apikey="{{ .Data.apikey }}"
+                export signature="{{ .Data.signature }}"
+              {{- end }}
+              {{ with secret "/team/clouds/build/csp-reporting" -}}
+                export db_host="{{ .Data.db_host }}"
+                export db_database="{{ .Data.db_database }}"
+                export db_user="{{ .Data.db_cloudadmin }}"
+                export db_password="{{ .Data.db_cloudadmin_password }}"
+                export zabbix_url="{{ .Data.zabbix_url }}"
+                export zabbix_monitored_host="{{ .Data.zabbix_monitored_host }}"
+              {{- end }}
+        spec:
+          serviceAccountName: csp-deploy
+          containers:
+          - name: csp-az-cronjob-billing
+            image: multirepo-oab.si.fr.intraorange:5002/dd_cloud_reporting/csp-az-billing:1.0.0
+            command: ["/bin/bash","-c","source /vault/secrets/config && python3 /app/az.py"]
+            imagePullPolicy: Always
+            volumeMounts:
+              - name: tz-config
+                mountPath: /etc/localtime
+          imagePullSecrets:
+          - name: regcred
+          restartPolicy: OnFailure
+          volumes:
+          - name: tz-config
+            hostPath:
+              path: /usr/share/zoneinfo/Europe/Paris

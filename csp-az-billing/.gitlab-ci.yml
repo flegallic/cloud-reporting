@@ -1,0 +1,15 @@
+# Template : https://xxxxxxxxxxxxxxxxxxxxxxxxxxxxx/dd-cloud-reporting/ci-cd/ci-templates
+include:
+  - project: 'dd-cloud-reporting/ci-cd/ci-templates'
+    ref: master
+    file: 'build_and_deploy.yml'
+
+deploy:preproduction:
+  extends: .deploy-preproduction
+  environment:
+    name: preproduction
+
+deploy:production:
+  extends: .deploy-production
+  environment:
+    name: production
