@@ -1,0 +1,4 @@
+python-dateutil
+requests
+py-zabbix
+mysql-connector-python
