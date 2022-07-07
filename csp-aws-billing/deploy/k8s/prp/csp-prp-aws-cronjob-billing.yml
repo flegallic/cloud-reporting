@@ -1,0 +1,71 @@
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: csp-prp-aws-cronjob-billing
+  namespace: csp-prp
+spec:
+  schedule: "0 9 8,15 * *"
+  concurrencyPolicy: Replace
+  failedJobsHistoryLimit: 1
+  successfulJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: csp-prp-aws-cronjob-billing
+          annotations:
+            vault.hashicorp.com/agent-pre-populate-only: 'true'
+            vault.hashicorp.com/agent-inject: 'true'
+            vault.hashicorp.com/tls-skip-verify: 'true'
+            vault.hashicorp.com/auth-path: 'auth/k8sclouds_z00n-prd'
+            vault.hashicorp.com/role: 'csp-prp-deploy'
+            vault.hashicorp.com/agent-inject-secret-config: "secrets/config"
+            vault.hashicorp.com/agent-inject-template-config: |
+              {{ with secret "/team/clouds/aws/dt-billing-api" -}}
+                export aws_region_name="{{ .Data.aws_region_name }}"
+                export aws_oab_access_key_id="{{ .Data.aws_oab_access_key_id }}"
+                export aws_oab_secret_access_key="{{ .Data.aws_oab_secret_access_key }}"
+                export aws_oab_roleArn="{{ .Data.aws_oab_roleArn }}"
+                export aws_oab_roleSessionName="{{ .Data.aws_oab_roleSessionName }}"
+
+                export aws_internal_access_key_id="{{ .Data.aws_internal_access_key_id }}"
+                export aws_internal_secret_access_key="{{ .Data.aws_internal_secret_access_key }}"
+                export aws_internal_roleArn="{{ .Data.aws_internal_roleArn }}"
+                export aws_internal_roleSessionName="{{ .Data.aws_internal_roleSessionName }}"
+
+                export aws_spp_ecm_access_key_id="{{ .Data.aws_spp_ecm_access_key_id }}"
+                export aws_spp_ecm_secret_access_key="{{ .Data.aws_spp_ecm_secret_access_key }}"
+                export aws_spp_ecm_roleArn="{{ .Data.aws_spp_ecm_roleArn }}"
+                export aws_spp_ecm_roleSessionName="{{ .Data.aws_spp_ecm_roleSessionName }}"
+
+                export aws_spp_pm_access_key_id="{{ .Data.aws_spp_pm_access_key_id }}"
+                export aws_spp_pm_secret_access_key="{{ .Data.aws_spp_pm_secret_access_key }}"
+                export aws_spp_pm_roleArn="{{ .Data.aws_spp_pm_roleArn }}"
+                export aws_spp_pm_roleSessionName="{{ .Data.aws_spp_pm_roleSessionName }}"
+              {{- end }}
+              {{ with secret "/team/clouds/build/suivi_SIP_prp" -}}
+                export db_host="{{ .Data.db_host }}"
+                export db_database="{{ .Data.db_database }}"
+                export db_user="{{ .Data.db_cloudadmin }}"
+                export db_password="{{ .Data.db_cloudadmin_password }}"
+                export zabbix_url="{{ .Data.zabbix_url }}"
+                export zabbix_monitored_host="{{ .Data.zabbix_monitored_host }}"
+              {{- end }}
+        spec:
+          serviceAccountName: csp-prp-deploy
+          containers:
+          - name: csp-prp-aws-cronjob-billing
+            image: multirepo-oab.si.fr.intraorange:5002/dd_cloud_reporting/csp-aws-billing:1.0.0
+            command: ["/bin/bash","-c","source /vault/secrets/config && python3 /app/aws.py"]
+            imagePullPolicy: Always
+            volumeMounts:
+              - name: tz-config
+                mountPath: /etc/localtime
+          imagePullSecrets:
+          - name: regcred
+          restartPolicy: OnFailure
+          volumes:
+          - name: tz-config
+            hostPath:
+              path: /usr/share/zoneinfo/Europe/Paris
